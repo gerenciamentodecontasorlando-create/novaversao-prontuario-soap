@@ -1,0 +1,883 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BTX Prontuário SOAP + Agenda (Offline)</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#1458d6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="BTX Prontuário">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+
+  <!-- PDF libs (CDN). O SW cacheia após o primeiro acesso. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#f4f7fb;
+      --card:#ffffff;
+      --ink:#0c1623;
+      --muted:#5b6b7d;
+      --blue:#1458d6;
+      --blue2:#0d3f9c;
+      --line:#dbe5f5;
+      --shadow: 0 10px 30px rgba(10,40,90,.08);
+      --radius: 16px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: linear-gradient(180deg,#f7fbff, var(--bg));
+      color:var(--ink);
+    }
+    header{
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(255,255,255,.92);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap{max-width:1200px;margin:0 auto;padding:14px 16px}
+    .top{display:flex; gap:12px; align-items:center; justify-content:space-between;}
+    .brand{display:flex; gap:12px; align-items:center;}
+    .logo{
+      width:40px;height:40px;border-radius:12px;
+      background: linear-gradient(135deg,var(--blue),var(--blue2));
+      box-shadow: var(--shadow);
+    }
+    .brand h1{font-size:16px;margin:0;line-height:1.1}
+    .brand small{display:block;color:var(--muted);font-weight:500}
+    .actions{display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end}
+
+    button, .btn{
+      border:1px solid var(--line);
+      background:#fff;
+      color:var(--ink);
+      padding:10px 12px;
+      border-radius:12px;
+      cursor:pointer;
+      font-weight:600;
+      transition:.15s;
+    }
+    button:hover{transform: translateY(-1px); border-color:#bfd3fb}
+    button.primary{
+      background: linear-gradient(135deg,var(--blue),var(--blue2));
+      color:#fff;border-color:transparent;
+    }
+    button.danger{background:#fff;border-color:#ffd1d1;color:#b40000}
+    button.ghost{background:transparent}
+
+    .main{max-width:1200px;margin:0 auto;padding:18px 16px 40px}
+    .grid{display:grid; gap:14px; grid-template-columns: 360px 1fr; align-items:start;}
+    @media (max-width: 980px){
+      .grid{grid-template-columns:1fr}
+      .actions{justify-content:flex-start}
+    }
+
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .card .hd{
+      padding:14px 14px 10px;
+      border-bottom:1px solid var(--line);
+      display:flex; gap:10px; align-items:center; justify-content:space-between;
+    }
+    .card .hd h2{font-size:14px;margin:0}
+    .card .bd{padding:14px}
+    .muted{color:var(--muted)}
+    .row{display:flex; gap:10px; flex-wrap:wrap}
+    .col{flex:1; min-width: 160px}
+    label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600}
+    input, select, textarea{
+      width:100%;
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px 10px;
+      font:inherit;
+      outline:none;
+      background:#fff;
+    }
+    textarea{min-height:90px; resize:vertical}
+
+    .tabs{
+      display:flex; gap:8px; flex-wrap:wrap;
+      padding:10px 14px;
+      border-bottom:1px solid var(--line);
+      background: #fbfdff;
+    }
+    .tab{
+      padding:9px 12px;
+      border-radius: 999px;
+      border:1px solid var(--line);
+      background:#fff;
+      cursor:pointer;
+      font-weight:700;
+      font-size:13px;
+      color: var(--muted);
+      user-select:none;
+    }
+    .tab.active{
+      color:#fff;
+      border-color:transparent;
+      background: linear-gradient(135deg,var(--blue),var(--blue2));
+    }
+    .pill{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:#fff;
+      font-size:12px;
+      color:var(--muted);
+      font-weight:700;
+    }
+    .list{display:flex; flex-direction:column; gap:8px;}
+    .item{
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:10px 10px;
+      background:#fff;
+      display:flex; gap:10px; align-items:flex-start; justify-content:space-between;
+    }
+    .item strong{display:block;font-size:13px}
+    .item small{display:block;color:var(--muted);margin-top:2px}
+    .item .miniActions{display:flex; gap:6px}
+    .item .miniActions button{padding:8px 10px;border-radius:10px}
+    .sectionTitle{
+      font-size:12px;
+      letter-spacing:.08em;
+      color: var(--muted);
+      font-weight:800;
+      margin:14px 0 8px;
+      text-transform: uppercase;
+    }
+    .hr{height:1px;background:var(--line);margin:12px 0}
+
+    /* Calendar */
+    .calHead{
+      display:flex; gap:8px; align-items:center; justify-content:space-between;
+      margin-bottom:10px;
+    }
+    .calGrid{
+      display:grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap:6px;
+    }
+    .calDow{
+      text-align:center;
+      font-size:11px;
+      color: var(--muted);
+      font-weight:800;
+      padding:6px 0;
+    }
+    .day{
+      border:1px solid var(--line);
+      border-radius:12px;
+      min-height:72px;
+      padding:8px;
+      background:#fff;
+      cursor:pointer;
+      position:relative;
+    }
+    .day:hover{border-color:#bfd3fb}
+    .day .n{font-weight:800;font-size:12px}
+    .day .dots{
+      position:absolute; bottom:8px; left:8px; display:flex; gap:4px; flex-wrap:wrap;
+    }
+    .dot{width:7px;height:7px;border-radius:99px;background:var(--blue);opacity:.85;}
+    .day.mutedDay{opacity:.45}
+    .day.today{outline:2px solid rgba(20,88,214,.22)}
+    .day.selected{outline:2px solid rgba(20,88,214,.55)}
+
+    /* Document sheets */
+    .docSheet{
+      background:#fff;
+      color:#000;
+      padding:16px 18px;
+      border:2px solid #1d2f55;
+      border-radius: 10px;
+      width: 794px; /* close to A4 @96dpi */
+      max-width: 100%;
+    }
+    .docTop{
+      display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+      border-bottom:1px solid #1d2f55;
+      padding-bottom:10px;
+      margin-bottom:10px;
+    }
+    .docTop .prof strong{font-size:14px}
+    .docTop .prof small{display:block; font-size:11px; color:#111}
+    .docTitle{
+      text-align:center;
+      font-weight:900;
+      letter-spacing:.12em;
+      margin:10px 0;
+    }
+    .docBox{
+      border:1px solid #1d2f55;
+      border-radius:10px;
+      padding:10px 12px;
+      margin:10px 0;
+      min-height: 240px;
+    }
+    .docFooter{display:flex; justify-content:space-between; gap:10px; margin-top:12px;}
+    .docSign{
+      border-top:1px solid #000;
+      padding-top:8px;
+      min-width: 260px;
+      text-align:center;
+      font-size:12px;
+    }
+    .docRow{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin:8px 0;
+      font-size:12px;
+    }
+    .docRow > div{
+      border:1px solid #1d2f55;
+      border-radius:10px;
+      padding:8px 10px;
+      flex:1;
+      min-width: 220px;
+    }
+
+    @media print{
+      header, .noPrint{display:none !important}
+      body{background:#fff}
+      .main{padding:0}
+      .card{border:none;box-shadow:none}
+      .docSheet{border:2px solid #1d2f55}
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <div class="wrap top">
+    <div class="brand">
+      <div class="logo"></div>
+      <div>
+        <h1>BTX Prontuário <span class="muted">• SOAP + Agenda</span></h1>
+        <small>Offline-first • Memória forte (IndexedDB) • PDF/Impressão</small>
+      </div>
+    </div>
+
+    <div class="actions noPrint">
+      <button class="ghost" id="btnDemo">⚡ Preencher exemplo</button>
+      <button id="btnBackup">📦 Backup</button>
+      <button id="btnRestore">📥 Restaurar</button>
+      <button class="danger" id="btnReset">🧨 Zerar tudo</button>
+    </div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="grid">
+
+    <!-- LEFT: Patients -->
+    <div class="card">
+      <div class="hd">
+        <h2>Pacientes</h2>
+        <span class="pill" id="dbStatus">⏳ iniciando…</span>
+      </div>
+      <div class="bd">
+        <div class="row">
+          <div class="col">
+            <label>Buscar</label>
+            <input id="patientSearch" placeholder="Nome, CPF, telefone…" />
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="sectionTitle">Novo paciente</div>
+        <div class="row">
+          <div class="col">
+            <label>Nome</label>
+            <input id="pName" placeholder="Ex.: Maria Silva" />
+          </div>
+          <div class="col">
+            <label>Nascimento</label>
+            <input id="pDob" type="date" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label>CPF (opcional)</label>
+            <input id="pCpf" placeholder="000.000.000-00" />
+          </div>
+          <div class="col">
+            <label>Telefone</label>
+            <input id="pPhone" placeholder="(xx) xxxxx-xxxx" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label>Observações rápidas</label>
+            <input id="pObs" placeholder="Alergias, comorbidades, etc." />
+          </div>
+        </div>
+
+        <div class="row">
+          <button class="primary" id="btnAddPatient">➕ Cadastrar</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="sectionTitle">Lista</div>
+        <div class="list" id="patientList"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Workspace -->
+    <div class="card">
+      <div class="tabs noPrint">
+        <div class="tab active" data-tab="tabAgenda">📅 Agenda</div>
+        <div class="tab" data-tab="tabSOAP">🧠 Prontuário (SOAP)</div>
+        <div class="tab" data-tab="tabRx">🧾 Receituário</div>
+        <div class="tab" data-tab="tabAtestado">📄 Atestado</div>
+        <div class="tab" data-tab="tabSettings">⚙️ Profissional</div>
+      </div>
+
+      <!-- AGENDA -->
+      <div class="bd" id="tabAgenda">
+        <div class="calHead">
+          <div class="row" style="gap:8px; align-items:center">
+            <span class="pill">Calendário</span>
+            <select id="calMonth"></select>
+            <select id="calYear"></select>
+          </div>
+          <div class="row noPrint">
+            <button id="btnToday">Hoje</button>
+          </div>
+        </div>
+
+        <div class="calGrid" id="calDow"></div>
+        <div class="calGrid" id="calendar"></div>
+
+        <div class="hr"></div>
+
+        <div class="row" style="align-items:center; justify-content:space-between">
+          <div>
+            <div class="sectionTitle" style="margin:0 0 6px">Agendamentos do dia</div>
+            <div class="muted" id="selectedDayLabel">Selecione um dia no calendário.</div>
+          </div>
+          <div class="row noPrint">
+            <button class="primary" id="btnNewAppt">➕ Agendar</button>
+          </div>
+        </div>
+
+        <div class="list" id="apptList" style="margin-top:10px"></div>
+      </div>
+
+      <!-- SOAP -->
+      <div class="bd" id="tabSOAP" style="display:none">
+        <div class="row" style="align-items:center; justify-content:space-between">
+          <div class="row" style="align-items:center">
+            <span class="pill">Paciente selecionado</span>
+            <strong id="soapPatientName" style="font-size:14px">Nenhum</strong>
+          </div>
+          <div class="row noPrint">
+            <button id="btnNewEncounter" class="primary">➕ Nova consulta</button>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row" style="align-items:center; justify-content:space-between">
+          <div>
+            <div class="sectionTitle" style="margin:0 0 6px">Linha do tempo</div>
+            <div class="muted">Cada retorno vira uma nova consulta, mantendo histórico.</div>
+          </div>
+          <div class="row" style="align-items:center">
+            <label style="margin:0; min-width:160px">
+              <span class="muted" style="display:block;margin-bottom:6px">Consulta atual</span>
+              <select id="encounterSelect"></select>
+            </label>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="col">
+            <label>Data/Hora</label>
+            <input id="encDate" type="datetime-local" />
+          </div>
+          <div class="col">
+            <label>Motivo da consulta (técnico)</label>
+            <input id="encReason" placeholder="Ex.: dor abdominal / retorno exames / pré-natal…" />
+          </div>
+        </div>
+
+        <div class="sectionTitle">S — Subjetivo</div>
+        <div class="row">
+          <div class="col">
+            <label>Queixa principal (fala do paciente)</label>
+            <textarea id="s_qp"></textarea>
+          </div>
+          <div class="col">
+            <label>HDA / História atual</label>
+            <textarea id="s_hda"></textarea>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label>Antecedentes / Medicações / Alergias (relevante)</label>
+            <textarea id="s_hx"></textarea>
+          </div>
+          <div class="col">
+            <label>Revisão de sistemas (se necessário)</label>
+            <textarea id="s_ros"></textarea>
+          </div>
+        </div>
+
+        <div class="sectionTitle">O — Objetivo</div>
+        <div class="row">
+          <div class="col">
+            <label>Sinais vitais</label>
+            <textarea id="o_vs"></textarea>
+          </div>
+          <div class="col">
+            <label>Exame físico (cabeça aos pés / dirigido)</label>
+            <textarea id="o_pe"></textarea>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label>Exames (com data)</label>
+            <textarea id="o_labs"></textarea>
+          </div>
+          <div class="col">
+            <label>Achados relevantes/negativos importantes</label>
+            <textarea id="o_key"></textarea>
+          </div>
+        </div>
+
+        <div class="sectionTitle">A — Avaliação</div>
+        <div class="row">
+          <div class="col">
+            <label>Impressão diagnóstica (principal + diferenciais)</label>
+            <textarea id="a_dx"></textarea>
+          </div>
+          <div class="col">
+            <label>Lista de problemas (opcional, excelente pra acompanhamento)</label>
+            <textarea id="a_prob"></textarea>
+          </div>
+        </div>
+
+        <div class="sectionTitle">P — Plano</div>
+        <div class="row">
+          <div class="col">
+            <label>Conduta / Exames / Medicações</label>
+            <textarea id="p_plan"></textarea>
+          </div>
+          <div class="col">
+            <label>Orientações / Retorno / Sinais de alarme</label>
+            <textarea id="p_guides"></textarea>
+          </div>
+        </div>
+
+        <div class="row noPrint" style="margin-top:10px">
+          <button id="btnSaveEncounter" class="primary">💾 Salvar consulta</button>
+          <button id="btnDeleteEncounter" class="danger">🗑️ Excluir consulta</button>
+          <button id="btnPrintSOAP">🖨️ Imprimir</button>
+          <button id="btnPdfSOAP">📄 PDF</button>
+        </div>
+
+        <div class="hr"></div>
+        <div id="soapPrintArea">
+          <div class="sectionTitle">Resumo para impressão</div>
+          <div class="muted">Este bloco é o que vai para impressão/PDF (formato limpo).</div>
+          <div class="card" style="box-shadow:none;margin-top:10px">
+            <div class="bd" id="soapPreview" style="font-size:13px; line-height:1.5"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RX -->
+      <div class="bd" id="tabRx" style="display:none">
+        <div class="row" style="align-items:center; justify-content:space-between">
+          <div class="row" style="align-items:center">
+            <span class="pill">Receituário</span>
+            <span class="muted">Borda + PDF + impressão</span>
+          </div>
+          <div class="row noPrint">
+            <button id="btnUseSelectedPatient">🎯 Usar paciente selecionado</button>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="col">
+            <label>Paciente</label>
+            <input id="rxPatient" placeholder="Nome do paciente" />
+          </div>
+          <div class="col">
+            <label>Data</label>
+            <input id="rxDate" type="date" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col">
+            <label>Medicamentos / Orientações (um por linha)</label>
+            <textarea id="rxText" placeholder="Ex.:&#10;1) Dipirona 500mg — 1 comp 6/6h se dor por 2 dias&#10;2) ..."></textarea>
+          </div>
+        </div>
+
+        <div class="row noPrint">
+          <button class="primary" id="btnRefreshRx">🔄 Atualizar visual</button>
+          <button id="btnPrintRx">🖨️ Imprimir</button>
+          <button id="btnPdfRx">📄 PDF</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div id="rxArea">
+          <div class="docSheet" id="rxSheet">
+            <div class="docTop">
+              <div class="prof" id="profBlockRx">
+                <strong id="profName">Profissional</strong>
+                <small id="profReg">Registro</small>
+                <small id="profContact">Contato</small>
+                <small id="profAddr">Endereço</small>
+              </div>
+              <div style="text-align:right">
+                <small><strong>Data:</strong> <span id="rxDateOut">—</span></small><br>
+                <small><strong>Paciente:</strong> <span id="rxPatientOut">—</span></small>
+              </div>
+            </div>
+
+            <div class="docTitle">RECEITUÁRIO</div>
+            <div class="docBox" id="rxBodyOut" style="white-space:pre-wrap"></div>
+
+            <div class="docFooter">
+              <div class="docSign">Assinatura / Carimbo</div>
+              <div class="docSign">Documento gerado pelo BTX Prontuário</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ATESTADO -->
+      <div class="bd" id="tabAtestado" style="display:none">
+        <div class="row" style="align-items:center; justify-content:space-between">
+          <div class="row" style="align-items:center">
+            <span class="pill">Atestado</span>
+            <span class="muted">PDF + impressão</span>
+          </div>
+          <div class="row noPrint">
+            <button id="btnUseSelectedPatientAt">🎯 Usar paciente selecionado</button>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="col">
+            <label>Paciente</label>
+            <input id="atPatient" placeholder="Nome do paciente" />
+          </div>
+          <div class="col">
+            <label>Data</label>
+            <input id="atDate" type="date" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col">
+            <label>CID (opcional)</label>
+            <input id="atCid" placeholder="Ex.: J06.9 / K35 / N39.0" />
+          </div>
+          <div class="col">
+            <label>Período (dias)</label>
+            <input id="atDays" type="number" min="0" step="1" placeholder="Ex.: 2" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col">
+            <label>Texto do atestado</label>
+            <textarea id="atText" placeholder="Ex.: Atesto para os devidos fins que o(a) paciente acima identificado(a) foi atendido(a) nesta data, necessitando de afastamento de suas atividades por __ dias."></textarea>
+          </div>
+        </div>
+
+        <div class="row noPrint">
+          <button class="primary" id="btnRefreshAt">🔄 Atualizar visual</button>
+          <button id="btnPrintAt">🖨️ Imprimir</button>
+          <button id="btnPdfAt">📄 PDF</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div id="atArea">
+          <div class="docSheet" id="atSheet">
+            <div class="docTop">
+              <div class="prof" id="profBlockAt">
+                <strong id="profNameAt">Profissional</strong>
+                <small id="profRegAt">Registro</small>
+                <small id="profContactAt">Contato</small>
+                <small id="profAddrAt">Endereço</small>
+              </div>
+              <div style="text-align:right">
+                <small><strong>Data:</strong> <span id="atDateOut">—</span></small><br>
+                <small><strong>Paciente:</strong> <span id="atPatientOut">—</span></small>
+              </div>
+            </div>
+
+            <div class="docTitle">ATESTADO</div>
+
+            <div class="docRow">
+              <div><strong>CID:</strong> <span id="atCidOut">—</span></div>
+              <div><strong>Afastamento:</strong> <span id="atDaysOut">—</span></div>
+            </div>
+
+            <div class="docBox" id="atBodyOut" style="white-space:pre-wrap"></div>
+
+            <div class="docFooter">
+              <div class="docSign">Assinatura / Carimbo</div>
+              <div class="docSign">Documento gerado pelo BTX Prontuário</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SETTINGS -->
+      <div class="bd" id="tabSettings" style="display:none">
+        <div class="row" style="align-items:center; justify-content:space-between">
+          <div>
+            <div class="sectionTitle" style="margin:0 0 6px">Dados do profissional</div>
+            <div class="muted">Aparece no receituário e no atestado.</div>
+          </div>
+          <div class="row noPrint">
+            <button class="primary" id="btnSaveProfile">💾 Salvar</button>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="col">
+            <label>Nome</label>
+            <input id="set_profName" placeholder="Ex.: Orlando Abreu Gomes da Silva" />
+          </div>
+          <div class="col">
+            <label>Registro (CRM/CRO/Outro)</label>
+            <input id="set_profReg" placeholder="Ex.: CRO-PA 0000 / CRM-PA 0000" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col">
+            <label>Contato</label>
+            <input id="set_profContact" placeholder="Telefone / e-mail" />
+          </div>
+          <div class="col">
+            <label>Endereço</label>
+            <input id="set_profAddr" placeholder="Rua, nº, cidade-estado" />
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="sectionTitle">Sementes de texto (templates SOAP)</div>
+        <div class="muted">Sugestões iniciais por consulta. Você personaliza quando quiser.</div>
+
+        <div class="row" style="margin-top:10px">
+          <div class="col">
+            <label>Subjetivo (modelo)</label>
+            <textarea id="tplS"></textarea>
+          </div>
+          <div class="col">
+            <label>Objetivo (modelo)</label>
+            <textarea id="tplO"></textarea>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label>Avaliação (modelo)</label>
+            <textarea id="tplA"></textarea>
+          </div>
+          <div class="col">
+            <label>Plano (modelo)</label>
+            <textarea id="tplP"></textarea>
+          </div>
+        </div>
+        <div class="row noPrint">
+          <button class="primary" id="btnSaveTemplates">💾 Salvar templates</button>
+          <button id="btnResetTemplates">↩️ Padrão</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<input type="file" id="restoreFile" accept="application/json" style="display:none" />
+
+<script>
+/* =========================
+   PWA: registra o service worker
+   ========================= */
+(function registerSW(){
+  if (!("serviceWorker" in navigator)) return;
+  window.addEventListener("load", async () => {
+    try{
+      await navigator.serviceWorker.register("./service-worker.js", { scope: "./" });
+    }catch(e){
+      console.warn("SW não registrado:", e);
+    }
+  });
+})();
+
+/* =========================
+   IndexedDB
+   ========================= */
+const DB_NAME = "BTX_PRONTUARIO_SOAP";
+const DB_VER  = 1;
+let db = null;
+
+function idbOpen(){
+  return new Promise((resolve,reject)=>{
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = ()=>{
+      const d = req.result;
+      if(!d.objectStoreNames.contains("patients")){
+        const st = d.createObjectStore("patients", { keyPath:"id" });
+        st.createIndex("name", "name", { unique:false });
+        st.createIndex("cpf", "cpf", { unique:false });
+        st.createIndex("phone", "phone", { unique:false });
+      }
+      if(!d.objectStoreNames.contains("encounters")){
+        const st = d.createObjectStore("encounters", { keyPath:"id" });
+        st.createIndex("patientId", "patientId", { unique:false });
+        st.createIndex("date", "date", { unique:false });
+      }
+      if(!d.objectStoreNames.contains("appointments")){
+        const st = d.createObjectStore("appointments", { keyPath:"id" });
+        st.createIndex("dateKey", "dateKey", { unique:false });
+        st.createIndex("patientId", "patientId", { unique:false });
+      }
+      if(!d.objectStoreNames.contains("settings")){
+        d.createObjectStore("settings", { keyPath:"key" });
+      }
+    };
+    req.onsuccess = ()=>{
+      db = req.result;
+      resolve(db);
+    };
+    req.onerror = ()=> reject(req.error);
+  });
+}
+function tx(store, mode="readonly"){ return db.transaction(store, mode).objectStore(store); }
+function idbPut(store, value){
+  return new Promise((resolve,reject)=>{
+    const req = tx(store,"readwrite").put(value);
+    req.onsuccess=()=>resolve(true);
+    req.onerror=()=>reject(req.error);
+  });
+}
+function idbDel(store, key){
+  return new Promise((resolve,reject)=>{
+    const req = tx(store,"readwrite").delete(key);
+    req.onsuccess=()=>resolve(true);
+    req.onerror=()=>reject(req.error);
+  });
+}
+function idbGet(store, key){
+  return new Promise((resolve,reject)=>{
+    const req = tx(store).get(key);
+    req.onsuccess=()=>resolve(req.result||null);
+    req.onerror=()=>reject(req.error);
+  });
+}
+function idbAll(store){
+  return new Promise((resolve,reject)=>{
+    const req = tx(store).getAll();
+    req.onsuccess=()=>resolve(req.result||[]);
+    req.onerror=()=>reject(req.error);
+  });
+}
+function uid(prefix="id"){ return prefix+"_"+Math.random().toString(16).slice(2)+Date.now().toString(16); }
+
+/* =========================
+   Estado
+   ========================= */
+let state = {
+  selectedPatientId: null,
+  selectedEncounterId: null,
+  selectedDateKey: null,
+  patients: [],
+  encounters: [],
+  appointments: [],
+  profile: null,
+  templates: null,
+};
+
+const $ = (id)=> document.getElementById(id);
+function setStatus(msg){ $("dbStatus").textContent = msg; }
+
+/* =========================
+   Templates padrão
+   ========================= */
+function defaultTemplates(){
+  return {
+    S:
+`QP: "Descreva aqui com as palavras do paciente."
+HDA: Início, duração, localização, intensidade (0-10), fatores de piora/melhora, sintomas associados, evolução.
+Antecedentes relevantes: (HAS/DM, cirurgias, gestação, etc.)
+Medicações em uso:
+Alergias:
+Hábitos/Contexto (se relevante):`,
+    O:
+`Sinais vitais: PA __/__ | FC __ | FR __ | SatO2 __% | T __
+Exame físico geral: BEG/REG/GEG; consciente e orientado; corado/hidratado; etc.
+Cabeça/pescoço:
+Cardiovascular:
+Respiratório:
+Abdome:
+Extremidades:
+Neurológico (se indicado):
+Exames complementares (com data):`,
+    A:
+`Impressão diagnóstica principal:
+Diferenciais (2-3):
+Gravidade / sinais de alerta:
+Lista de problemas (opcional):`,
+    P:
+`Conduta:
+- Exames solicitados:
+- Tratamento (medicações/doses):
+- Orientações e sinais de alarme:
+- Encaminhamentos:
+- Retorno/reavaliação:`
+  };
+}
+
+/* =========================
+   Tabs
+   ========================= */
+document.querySelectorAll(".tab").forEach(t=>{
+  t.addEventListener("click", ()=>{
+    document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+    t.classList.add("active");
+    const id = t.dataset.tab;
+    ["tabAgenda","tabSOAP","tabRx","tabAtestado","tabSettings"].forEach(sec=>{
+      $(sec).style.display = (sec===id) ? "block" : "none";
+    });
+    if(id==="tabSOAP") refreshSOAPUI();
+    if(id==="tabRx") refreshRxPreview();
+    if(id==="tabAtestado") refreshAtPreview();
